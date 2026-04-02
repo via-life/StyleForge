@@ -47,7 +47,7 @@ export const ZOOM_RANGE = {
 
 export const EXPORT_SIZE = 512;
 
-export const GITHUB_URL = 'https://github.com';
+export const GITHUB_URL = 'https://github.com/via-life/StyleForge';
 */
 /*
 
