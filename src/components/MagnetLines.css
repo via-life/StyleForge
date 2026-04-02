@@ -1,0 +1,13 @@
+.magnet-lines {
+  display: grid;
+  justify-items: center;
+  align-items: center;
+}
+
+.magnet-lines span {
+  display: block;
+  transform-origin: center;
+  will-change: transform;
+  transform: rotate(var(--rotate));
+  border-radius: 999px;
+}

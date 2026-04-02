@@ -1,0 +1,53 @@
+:root {
+  color-scheme: light;
+  --bg: #edf3ef;
+  --paper: rgba(255, 255, 255, 0.58);
+  --ink: #10202d;
+  --muted: rgba(16, 32, 45, 0.72);
+  --accent-mint: #8bd3c7;
+  --accent-peach: #ff9268;
+  --accent-sky: #cfe8ff;
+  --font-display: "STZhongsong", "Songti SC", "Times New Roman", serif;
+  --font-body: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.74), transparent 34%),
+    linear-gradient(180deg, #eef4f0 0%, #e8f0eb 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}

@@ -1,0 +1,21 @@
+.toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 20;
+  min-width: min(90vw, 18rem);
+  max-width: min(90vw, 28rem);
+  padding: 0.95rem 1.1rem;
+  border-radius: 999px;
+  background: rgba(16, 32, 45, 0.94);
+  color: #f7faf7;
+  font: 700 0.82rem/1.35 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-align: center;
+  box-shadow: 0 16px 36px rgba(16, 32, 45, 0.28);
+}
+
+.toast-host--error {
+  background: rgba(122, 28, 28, 0.94);
+}
