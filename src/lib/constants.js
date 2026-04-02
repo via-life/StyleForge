@@ -95,7 +95,7 @@ export const DEFAULT_PIXEL_LEVEL = PIXEL_LEVELS[0];
 
 export const EXPORT_SIZE = 512;
 
-export const GITHUB_URL = 'https://github.com';
+export const GITHUB_URL = 'https://github.com/via-life/StyleForge';
 */
 
 export const STYLE_OPTIONS = [
