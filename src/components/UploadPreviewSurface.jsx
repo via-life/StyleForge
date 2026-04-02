@@ -136,6 +136,7 @@ export default function UploadPreviewSurface({
   previewStyle,
   backgroundColor,
   pixelLevel,
+  performanceTier,
   uiState,
   dragActive,
   onBrowse
@@ -167,6 +168,7 @@ export default function UploadPreviewSurface({
       backgroundOpacity={0.08}
       saturation={1.2}
       displace={0.6}
+      performanceTier={performanceTier}
       className={`upload-surface ${dragActive ? 'is-dragging' : ''} ${sourceImage ? 'is-ready' : ''}`}
     >
       {!sourceImage ? (

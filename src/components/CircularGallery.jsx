@@ -494,12 +494,15 @@ export default function CircularGallery({
   font = 'bold 30px Figtree',
   scrollSpeed = 2,
   scrollEase = 0.05,
+  performanceTier = 'desktop',
   fallback = null
 }) {
   const containerRef = useRef(null);
   const shouldFallback =
     typeof window !== 'undefined' &&
-    (!supportsWebGL() || window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    (performanceTier !== 'desktop' ||
+      !supportsWebGL() ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   useEffect(() => {
     if (!containerRef.current || shouldFallback) {

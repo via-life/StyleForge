@@ -22,6 +22,7 @@ export default function GlassSurface({
   xChannel = 'R',
   yChannel = 'G',
   mixBlendMode = 'difference',
+  performanceTier = 'desktop',
   className = '',
   style = {}
 }) {
@@ -37,6 +38,7 @@ export default function GlassSurface({
   const greenChannelRef = useRef(null);
   const blueChannelRef = useRef(null);
   const gaussianBlurRef = useRef(null);
+  const useSvgGlass = performanceTier === 'desktop';
 
   const generateDisplacementMap = () => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -71,6 +73,10 @@ export default function GlassSurface({
   };
 
   useEffect(() => {
+    if (!useSvgGlass) {
+      return undefined;
+    }
+
     updateDisplacementMap();
     [
       { ref: redChannelRef, offset: redOffset },
@@ -102,11 +108,12 @@ export default function GlassSurface({
     blueOffset,
     xChannel,
     yChannel,
-    mixBlendMode
+    mixBlendMode,
+    useSvgGlass
   ]);
 
   useEffect(() => {
-    if (!containerRef.current) {
+    if (!useSvgGlass || !containerRef.current) {
       return undefined;
     }
 
@@ -119,15 +126,24 @@ export default function GlassSurface({
     return () => {
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [useSvgGlass]);
 
   useEffect(() => {
+    if (!useSvgGlass) {
+      return;
+    }
+
     window.setTimeout(updateDisplacementMap, 0);
-  }, [width, height]);
+  }, [height, useSvgGlass, width]);
 
   useEffect(() => {
+    if (!useSvgGlass) {
+      setSvgSupported(false);
+      return;
+    }
+
     setSvgSupported(supportsSVGFilters(filterId));
-  }, [filterId]);
+  }, [filterId, useSvgGlass]);
 
   const containerStyle = {
     ...style,
@@ -142,7 +158,13 @@ export default function GlassSurface({
   return (
     <div
       ref={containerRef}
-      className={`glass-surface ${svgSupported ? 'glass-surface--svg' : 'glass-surface--fallback'} ${className}`}
+      className={`glass-surface ${
+        performanceTier === 'low-end-mobile'
+          ? 'glass-surface--flat'
+          : svgSupported
+            ? 'glass-surface--svg'
+            : 'glass-surface--fallback'
+      } ${className}`}
       style={containerStyle}
     >
       <svg className="glass-surface__filter" xmlns="http://www.w3.org/2000/svg">

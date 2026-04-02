@@ -4,9 +4,13 @@ import CircularGallery from './CircularGallery';
 
 import './StylePreviewGallery.css';
 
-function GalleryFallback({ items, selectedStyle, onSelectStyle }) {
+function GalleryFallback({ items, selectedStyle, onSelectStyle, performanceTier }) {
   return (
-    <div className="style-preview__fallback">
+    <div
+      className={`style-preview__fallback ${
+        performanceTier !== 'desktop' ? 'is-mobile-performance' : ''
+      }`}
+    >
       {items.map(item => (
         <button
           key={item.id}
@@ -16,6 +20,7 @@ function GalleryFallback({ items, selectedStyle, onSelectStyle }) {
         >
           <img src={item.image} alt={item.text} />
           <span>{item.text}</span>
+          <small>{item.note}</small>
         </button>
       ))}
     </div>
@@ -29,6 +34,7 @@ export default function StylePreviewGallery({
   backgrounds,
   backgroundColor,
   onBackgroundChange,
+  performanceTier,
   isReady,
   isLoading
 }) {
@@ -36,7 +42,11 @@ export default function StylePreviewGallery({
   const currentBackground = backgrounds.find(background => background.value === backgroundColor);
 
   return (
-    <div className="style-preview">
+    <div
+      className={`style-preview ${performanceTier !== 'desktop' ? 'is-mobile-performance' : ''} ${
+        performanceTier === 'low-end-mobile' ? 'is-low-end-mobile' : ''
+      }`}
+    >
       <div className="style-preview__heading">
         <div className="style-preview__copy">
           <p className="style-preview__eyebrow">{isReady ? 'YOUR STYLE MATRIX' : 'STYLE PREVIEW'}</p>
@@ -80,11 +90,13 @@ export default function StylePreviewGallery({
           borderRadius={0.08}
           scrollSpeed={2}
           scrollEase={0.05}
+          performanceTier={performanceTier}
           fallback={
             <GalleryFallback
               items={deferredItems}
               selectedStyle={selectedStyle}
               onSelectStyle={onSelectStyle}
+              performanceTier={performanceTier}
             />
           }
         />

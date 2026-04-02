@@ -14,6 +14,14 @@
   mix-blend-mode: multiply;
 }
 
+.app-shell.is-mobile-performance .app-shell__grain {
+  opacity: 0.18;
+}
+
+.app-shell.is-low-end-mobile .app-shell__grain {
+  opacity: 0.08;
+}
+
 .app {
   position: relative;
   z-index: 1;

@@ -362,12 +362,13 @@ import {
   STYLE_OPTIONS
 } from './lib/constants';
 import {
-  buildStylePreview,
+  buildStylePreviewsProgressive,
   decodeLocalImage,
   exportAvatarPng,
   getDefaultGalleryItems
 } from './lib/image';
 import { trackEvent, trackPageView } from './lib/analytics';
+import { detectPerformanceTier, isMobilePerformanceTier } from './lib/performance';
 
 import './styles/app.css';
 
@@ -396,9 +397,49 @@ export default function App() {
   const [uiState, setUiState] = useState('empty');
   const [toast, setToast] = useState(null);
   const [isGeneratingGallery, setIsGeneratingGallery] = useState(false);
+  const [performanceTier, setPerformanceTier] = useState(() => detectPerformanceTier());
+  const isMobilePerformanceMode = isMobilePerformanceTier(performanceTier);
 
   useEffect(() => {
     trackPageView();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const updatePerformanceTier = () => {
+      setPerformanceTier(detectPerformanceTier());
+    };
+
+    const mediaQueries = [
+      window.matchMedia('(pointer: coarse)'),
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+    ];
+
+    updatePerformanceTier();
+    window.addEventListener('resize', updatePerformanceTier);
+    mediaQueries.forEach(mediaQuery => {
+      if (typeof mediaQuery.addEventListener === 'function') {
+        mediaQuery.addEventListener('change', updatePerformanceTier);
+        return;
+      }
+
+      mediaQuery.addListener(updatePerformanceTier);
+    });
+
+    return () => {
+      window.removeEventListener('resize', updatePerformanceTier);
+      mediaQueries.forEach(mediaQuery => {
+        if (typeof mediaQuery.removeEventListener === 'function') {
+          mediaQuery.removeEventListener('change', updatePerformanceTier);
+          return;
+        }
+
+        mediaQuery.removeListener(updatePerformanceTier);
+      });
+    };
   }, []);
 
   useEffect(() => {
@@ -408,40 +449,55 @@ export default function App() {
       return undefined;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
+    const placeholderItems = getDefaultGalleryItems(backgroundColor);
+    setGalleryItems(placeholderItems);
     setIsGeneratingGallery(true);
 
     const run = async () => {
-      const previews = await Promise.all(
-        STYLE_OPTIONS.map(async style => ({
-          id: style.id,
-          text: style.label,
-          note: style.description,
-          image: await buildStylePreview({
-            image: sourceImage,
-            style: style.id,
-            backgroundColor,
-            pixelLevel
-          })
-        }))
-      );
+      try {
+        await buildStylePreviewsProgressive({
+          image: sourceImage,
+          backgroundColor,
+          pixelLevel,
+          priorityStyle: previewStyle,
+          tier: performanceTier,
+          signal: controller.signal,
+          onPreview: preview => {
+            if (controller.signal.aborted) {
+              return;
+            }
 
-      if (cancelled) {
-        return;
-      }
+            startTransition(() => {
+              setGalleryItems(currentItems => {
+                const baseItems = currentItems.length ? currentItems : placeholderItems;
+                return baseItems.map(item => (item.id === preview.id ? preview : item));
+              });
+            });
+          }
+        });
 
-      startTransition(() => {
-        setGalleryItems(previews);
+        if (controller.signal.aborted) {
+          return;
+        }
+
         setIsGeneratingGallery(false);
-      });
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        console.error('Failed to build progressive gallery previews.', error);
+        setIsGeneratingGallery(false);
+      }
     };
 
     run();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [backgroundColor, pixelLevel, sourceImage]);
+  }, [backgroundColor, performanceTier, pixelLevel, previewStyle, sourceImage]);
 
   const pushToast = (message, tone = 'info') => {
     setToast(createToast(message, tone));
@@ -593,8 +649,12 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
-      <MagnetBackground />
+    <div
+      className={`app-shell ${isMobilePerformanceMode ? 'is-mobile-performance' : ''} ${
+        performanceTier === 'low-end-mobile' ? 'is-low-end-mobile' : ''
+      }`}
+    >
+      <MagnetBackground performanceTier={performanceTier} />
       <div className="app-shell__grain" aria-hidden="true" />
 
       <main className="app">
@@ -620,6 +680,7 @@ export default function App() {
             backgrounds={BACKGROUND_OPTIONS}
             backgroundColor={backgroundColor}
             onBackgroundChange={handleBackgroundChange}
+            performanceTier={performanceTier}
             isReady={Boolean(sourceImage)}
             isLoading={isGeneratingGallery}
           />
@@ -631,6 +692,7 @@ export default function App() {
             previewStyle={previewStyle}
             backgroundColor={backgroundColor}
             pixelLevel={pixelLevel}
+            performanceTier={performanceTier}
             uiState={uiState}
             dragActive={dragState.active}
             onBrowse={handleBrowseClick}

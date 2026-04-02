@@ -83,6 +83,33 @@
   transform: rotate(-14deg);
 }
 
+.magnet-background__field--mobile {
+  top: 12vh;
+  left: 50%;
+  opacity: 0.72;
+  transform: translateX(-50%) rotate(-8deg);
+}
+
+.magnet-background.is-mobile .magnet-background__pattern {
+  opacity: 0.56;
+}
+
+.magnet-background.is-mobile .magnet-background__glow {
+  filter: blur(72px);
+  opacity: 0.36;
+}
+
+.magnet-background.is-low-end-mobile .magnet-background__pattern {
+  opacity: 0.42;
+}
+
+.magnet-background.is-low-end-mobile .magnet-background__glow {
+  width: 34rem;
+  height: 34rem;
+  filter: blur(68px);
+  opacity: 0.24;
+}
+
 @media (max-width: 780px) {
   .magnet-background__field--primary {
     top: 3rem;
@@ -105,5 +132,11 @@
     right: -4rem;
     bottom: 10vh;
     transform: rotate(-12deg);
+  }
+
+  .magnet-background__field--mobile {
+    top: 18vh;
+    width: min(108vw, 44rem) !important;
+    height: min(108vw, 44rem) !important;
   }
 }

@@ -3,6 +3,11 @@ import { BACKGROUND_OPTIONS, EXPORT_SIZE, STYLE_OPTIONS } from './appConstants';
 const SUPPORTED_TYPES = new Set(['image/jpeg', 'image/png']);
 const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
 const SAMPLE_SIZE = 56;
+const PREVIEW_SIZE_BY_TIER = {
+  desktop: 320,
+  mobile: 224,
+  'low-end-mobile': 160
+};
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -157,6 +162,38 @@ function normalizePreviewBackground(backgroundColor) {
 }
 
 const styledSampleCache = new WeakMap();
+const extractedSampleCache = new WeakMap();
+const previewCache = new WeakMap();
+
+function getPreviewSizeForTier(tier = 'desktop') {
+  return PREVIEW_SIZE_BY_TIER[tier] || PREVIEW_SIZE_BY_TIER.desktop;
+}
+
+function getPreviewCacheKey(style, backgroundColor, pixelLevel, tier) {
+  return [style, backgroundColor || 'transparent', pixelLevel || EXPORT_SIZE, tier || 'desktop'].join('|');
+}
+
+function getPreviewCache(image) {
+  let imageCache = previewCache.get(image);
+
+  if (!imageCache) {
+    imageCache = new Map();
+    previewCache.set(image, imageCache);
+  }
+
+  return imageCache;
+}
+
+function yieldToBrowser() {
+  return new Promise(resolve => {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => resolve());
+      return;
+    }
+
+    setTimeout(resolve, 0);
+  });
+}
 
 function getContainFrame(image, size) {
   const { width, height } = getImageSize(image);
@@ -395,8 +432,11 @@ function removeBackground(data, size) {
     tryEnqueue(y * size + size - 1);
   }
 
-  while (queue.length) {
-    const pixelIndex = queue.shift();
+  let queueIndex = 0;
+
+  while (queueIndex < queue.length) {
+    const pixelIndex = queue[queueIndex];
+    queueIndex += 1;
     const x = pixelIndex % size;
     const y = Math.floor(pixelIndex / size);
 
@@ -432,7 +472,13 @@ function removeBackground(data, size) {
   softenEdges(data, backgroundMask, size);
 }
 
-function createStyledSample({ image, style }) {
+function getExtractedSample(image) {
+  const cached = extractedSampleCache.get(image);
+
+  if (cached) {
+    return cached;
+  }
+
   const sampleCanvas = createCanvas(EXPORT_SIZE);
   const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
   const frame = getContainFrame(image, EXPORT_SIZE);
@@ -452,7 +498,22 @@ function createStyledSample({ image, style }) {
   const imageData = sampleCtx.getImageData(0, 0, EXPORT_SIZE, EXPORT_SIZE);
   const { data } = imageData;
   removeBackground(data, EXPORT_SIZE);
+  sampleCtx.putImageData(imageData, 0, 0);
+  extractedSampleCache.set(image, sampleCanvas);
 
+  return sampleCanvas;
+}
+
+function createStyledSample({ image, style }) {
+  const baseCanvas = getExtractedSample(image);
+  const sampleCanvas = createCanvas(EXPORT_SIZE);
+  const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+  sampleCtx.clearRect(0, 0, EXPORT_SIZE, EXPORT_SIZE);
+  sampleCtx.drawImage(baseCanvas, 0, 0);
+
+  const imageData = sampleCtx.getImageData(0, 0, EXPORT_SIZE, EXPORT_SIZE);
+  const { data } = imageData;
   for (let index = 0; index < data.length; index += 4) {
     if (data[index + 3] === 0) {
       continue;
@@ -711,17 +772,70 @@ export function renderAvatarPreview({ canvas, image, style, backgroundColor, pix
   });
 }
 
-export async function buildStylePreview({ image, style, backgroundColor, pixelLevel }) {
-  const canvas = createCanvas(320);
+export async function buildStylePreview({ image, style, backgroundColor, pixelLevel, tier = 'desktop' }) {
+  const previewSize = getPreviewSizeForTier(tier);
+  const cacheKey = getPreviewCacheKey(style, backgroundColor, pixelLevel, tier);
+  const imageCache = getPreviewCache(image);
+
+  if (imageCache.has(cacheKey)) {
+    return imageCache.get(cacheKey);
+  }
+
+  const canvas = createCanvas(previewSize);
   renderToCanvas({
     canvas,
     image,
     style,
     backgroundColor,
-    size: 320,
+    size: previewSize,
     pixelLevel
   });
-  return canvas.toDataURL('image/png');
+
+  const previewDataUrl = canvas.toDataURL('image/png');
+  imageCache.set(cacheKey, previewDataUrl);
+  return previewDataUrl;
+}
+
+export async function buildStylePreviewsProgressive({
+  image,
+  backgroundColor,
+  pixelLevel,
+  priorityStyle,
+  tier = 'desktop',
+  onPreview,
+  signal
+}) {
+  const orderedStyles = [
+    ...STYLE_OPTIONS.filter(style => style.id === priorityStyle),
+    ...STYLE_OPTIONS.filter(style => style.id !== priorityStyle)
+  ];
+
+  for (const style of orderedStyles) {
+    if (signal?.aborted) {
+      return;
+    }
+
+    const previewImage = await buildStylePreview({
+      image,
+      style: style.id,
+      backgroundColor,
+      pixelLevel,
+      tier
+    });
+
+    if (signal?.aborted) {
+      return;
+    }
+
+    onPreview?.({
+      id: style.id,
+      text: style.label,
+      note: style.description,
+      image: previewImage
+    });
+
+    await yieldToBrowser();
+  }
 }
 
 export async function exportAvatarPng({ image, style, backgroundColor, fileName, pixelLevel }) {

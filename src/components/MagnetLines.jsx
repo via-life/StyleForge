@@ -10,12 +10,17 @@ export default function MagnetLines({
   lineWidth = '1vmin',
   lineHeight = '6vmin',
   baseAngle = -10,
+  interactive = true,
   className = '',
   style = {}
 }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
+    if (!interactive) {
+      return undefined;
+    }
+
     const container = containerRef.current;
 
     if (!container) {
@@ -50,7 +55,7 @@ export default function MagnetLines({
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
     };
-  }, []);
+  }, [interactive]);
 
   const total = rows * columns;
   const spans = Array.from({ length: total }, (_, index) => (
