@@ -1,13 +1,19 @@
-import { BACKGROUND_OPTIONS, EXPORT_SIZE, STYLE_OPTIONS } from './appConstants';
+﻿import { BACKGROUND_OPTIONS, EXPORT_SIZE, STYLE_OPTIONS } from './constants';
+import { clampRgbChannel, hexToRgb, normalizeHexColor, rgbToCss } from './colors';
 
 const SUPPORTED_TYPES = new Set(['image/jpeg', 'image/png']);
 const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
 const SAMPLE_SIZE = 56;
+const DEFAULT_CUSTOM_STYLE_COLORS = ['#6FD2FF', '#9AF3D0', '#FFFFFF'];
 const PREVIEW_SIZE_BY_TIER = {
   desktop: 320,
   mobile: 224,
   'low-end-mobile': 160
 };
+
+const styledSampleCache = new WeakMap();
+const extractedSampleCache = new WeakMap();
+const previewCache = new WeakMap();
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -38,17 +44,6 @@ function createCanvas(size) {
 function isSupportedFile(file) {
   const lowerName = file.name.toLowerCase();
   return SUPPORTED_TYPES.has(file.type) || SUPPORTED_EXTENSIONS.some(ext => lowerName.endsWith(ext));
-}
-
-function drawRoundedRect(ctx, x, y, width, height, radius) {
-  const r = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + width, y, x + width, y + height, r);
-  ctx.arcTo(x + width, y + height, x, y + height, r);
-  ctx.arcTo(x, y + height, x, y, r);
-  ctx.arcTo(x, y, x + width, y, r);
-  ctx.closePath();
 }
 
 function sanitizeFileName(name) {
@@ -134,43 +129,22 @@ function blendRgb(source, target, amount) {
   };
 }
 
-function hexToRgb(hex) {
-  const normalized = hex.replace('#', '');
-  const value = normalized.length === 3
-    ? normalized
-        .split('')
-        .map(char => char + char)
-        .join('')
-    : normalized;
-
-  const numeric = Number.parseInt(value, 16);
-  return {
-    r: (numeric >> 16) & 255,
-    g: (numeric >> 8) & 255,
-    b: numeric & 255
-  };
+function adjustContrast(channel, amount) {
+  return roundChannel((channel - 128) * amount + 128);
 }
 
 function tintHex(hex, targetHex, amount) {
   const safeHex = hex === 'transparent' ? '#f4f8f6' : hex;
   const result = blendRgb(hexToRgb(safeHex), hexToRgb(targetHex), amount);
-  return `rgb(${result.r}, ${result.g}, ${result.b})`;
+  return rgbToCss(result);
 }
 
 function normalizePreviewBackground(backgroundColor) {
   return backgroundColor === 'transparent' ? '#f4f8f6' : backgroundColor;
 }
 
-const styledSampleCache = new WeakMap();
-const extractedSampleCache = new WeakMap();
-const previewCache = new WeakMap();
-
 function getPreviewSizeForTier(tier = 'desktop') {
   return PREVIEW_SIZE_BY_TIER[tier] || PREVIEW_SIZE_BY_TIER.desktop;
-}
-
-function getPreviewCacheKey(style, backgroundColor, pixelLevel, tier) {
-  return [style, backgroundColor || 'transparent', pixelLevel || EXPORT_SIZE, tier || 'desktop'].join('|');
 }
 
 function getPreviewCache(image) {
@@ -184,15 +158,14 @@ function getPreviewCache(image) {
   return imageCache;
 }
 
-function yieldToBrowser() {
-  return new Promise(resolve => {
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => resolve());
-      return;
-    }
-
-    setTimeout(resolve, 0);
-  });
+function getPreviewCacheKey({ style, backgroundColor, pixelLevel, tier, subjectOpacity }) {
+  return [
+    style,
+    backgroundColor || 'transparent',
+    pixelLevel || EXPORT_SIZE,
+    tier || 'desktop',
+    subjectOpacity ?? 100
+  ].join('|');
 }
 
 function getContainFrame(image, size) {
@@ -234,62 +207,6 @@ function createPreviewCardSvg({ title, subtitle, fillA, fillB, accent, textColor
   `;
 
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
-function adjustContrast(channel, amount) {
-  return roundChannel((channel - 128) * amount + 128);
-}
-
-function transformPixel(style, red, green, blue) {
-  const hsl = rgbToHsl(red, green, blue);
-  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
-
-  if (style === 'fresh') {
-    const base = hslToRgb(hsl.h * 0.96 + 0.04, clamp(hsl.s * 0.9 + 0.06, 0, 1), clamp(hsl.l + 0.12, 0, 1));
-    return blendRgb(base, { r: 174, g: 240, b: 220 }, 0.18);
-  }
-
-  if (style === 'cyber') {
-    const palette = [
-      { r: 5, g: 15, b: 30 },
-      { r: 19, g: 52, b: 95 },
-      { r: 10, g: 214, b: 214 },
-      { r: 219, g: 55, b: 197 },
-      { r: 244, g: 251, b: 255 }
-    ];
-    const segment = clamp(Math.round(luminance * (palette.length - 1)), 0, palette.length - 1);
-    const paletteColor = palette[segment];
-    const source = { r: red, g: green, b: blue };
-    const intensity = clamp(Math.abs((blue - red) / 255) * 0.5 + 0.48, 0.42, 0.78);
-    return blendRgb(source, paletteColor, intensity);
-  }
-
-  if (style === 'dopamine') {
-    const hueSlots = [0.08, 0.14, 0.53, 0.9];
-    const mappedHue = hueSlots[Math.floor(hsl.h * hueSlots.length) % hueSlots.length];
-    const base = hslToRgb(mappedHue, clamp(hsl.s * 1.5 + 0.18, 0, 1), clamp(hsl.l + 0.08, 0, 1));
-    const candy = luminance > 0.62 ? { r: 255, g: 214, b: 77 } : { r: 255, g: 86, b: 140 };
-    return blendRgb(base, candy, luminance > 0.62 ? 0.18 : 0.12);
-  }
-
-  if (style === 'dark') {
-    const shadow = { r: 10, g: 18, b: 30 };
-    const mid = { r: 54, g: 73, b: 98 };
-    const highlight = { r: 215, g: 224, b: 237 };
-    const blend = luminance < 0.42 ? shadow : luminance < 0.76 ? mid : highlight;
-    const cool = blendRgb({ r: red, g: green, b: blue }, blend, luminance < 0.42 ? 0.76 : 0.58);
-    return {
-      r: roundChannel(cool.r * 0.94),
-      g: roundChannel(cool.g * 0.97),
-      b: roundChannel(cool.b * 1.04)
-    };
-  }
-
-  return {
-    r: adjustContrast(red, 1.02),
-    g: adjustContrast(green, 1.02),
-    b: adjustContrast(blue, 1.02)
-  };
 }
 
 function colorDistance(redA, greenA, blueA, redB, greenB, blueB) {
@@ -504,51 +421,114 @@ function getExtractedSample(image) {
   return sampleCanvas;
 }
 
-function createStyledSample({ image, style }) {
-  const baseCanvas = getExtractedSample(image);
-  const sampleCanvas = createCanvas(EXPORT_SIZE);
-  const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
-
-  sampleCtx.clearRect(0, 0, EXPORT_SIZE, EXPORT_SIZE);
-  sampleCtx.drawImage(baseCanvas, 0, 0);
-
-  const imageData = sampleCtx.getImageData(0, 0, EXPORT_SIZE, EXPORT_SIZE);
-  const { data } = imageData;
-  for (let index = 0; index < data.length; index += 4) {
-    if (data[index + 3] === 0) {
-      continue;
-    }
-
-    const next = transformPixel(style, data[index], data[index + 1], data[index + 2]);
-    data[index] = next.r;
-    data[index + 1] = next.g;
-    data[index + 2] = next.b;
-  }
-
-  sampleCtx.putImageData(imageData, 0, 0);
-  return sampleCanvas;
+function normalizeCustomStyleColors(colors = [], count = 1) {
+  const safeCount = clamp(Number(count) || 1, 1, 3);
+  const palette = Array.from({ length: safeCount }, (_, index) =>
+    normalizeHexColor(colors[index] || DEFAULT_CUSTOM_STYLE_COLORS[index] || DEFAULT_CUSTOM_STYLE_COLORS[0])
+  );
+  return palette;
 }
 
-function drawPixelGrid(ctx, size, opacity) {
-  const step = size / SAMPLE_SIZE;
-  ctx.save();
-  ctx.strokeStyle = `rgba(16, 32, 45, ${opacity})`;
-  ctx.lineWidth = Math.max(0.8, size / 640);
-
-  for (let index = 1; index < SAMPLE_SIZE; index += 1) {
-    const offset = step * index;
-    ctx.beginPath();
-    ctx.moveTo(offset, 0);
-    ctx.lineTo(offset, size);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(0, offset);
-    ctx.lineTo(size, offset);
-    ctx.stroke();
+function buildStyleCacheKey(style, customStyleColors, customStyleColorCount) {
+  if (style !== 'custom') {
+    return style;
   }
 
-  ctx.restore();
+  return `custom|${normalizeCustomStyleColors(customStyleColors, customStyleColorCount).join('|')}`;
+}
+
+function transformCustomPixel(red, green, blue, customStyleColors, customStyleColorCount) {
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  const palette = normalizeCustomStyleColors(customStyleColors, customStyleColorCount).map(hexToRgb);
+
+  if (palette.length === 1) {
+    const shadow = blendRgb({ r: 12, g: 18, b: 28 }, palette[0], 0.78);
+    const highlight = blendRgb(palette[0], { r: 255, g: 255, b: 255 }, 0.34);
+    return blendRgb(shadow, highlight, luminance);
+  }
+
+  if (palette.length === 2) {
+    return blendRgb(palette[0], palette[1], luminance);
+  }
+
+  if (luminance < 0.5) {
+    return blendRgb(palette[0], palette[1], luminance * 2);
+  }
+
+  return blendRgb(palette[1], palette[2], (luminance - 0.5) * 2);
+}
+
+function transformPixel(style, red, green, blue, options = {}) {
+  const hsl = rgbToHsl(red, green, blue);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+
+  if (style === 'custom') {
+    return transformCustomPixel(red, green, blue, options.customStyleColors, options.customStyleColorCount);
+  }
+
+  if (style === 'fresh') {
+    const base = hslToRgb(hsl.h * 0.96 + 0.04, clamp(hsl.s * 0.9 + 0.06, 0, 1), clamp(hsl.l + 0.12, 0, 1));
+    return blendRgb(base, { r: 174, g: 240, b: 220 }, 0.18);
+  }
+
+  if (style === 'cyber') {
+    const palette = [
+      { r: 5, g: 15, b: 30 },
+      { r: 19, g: 52, b: 95 },
+      { r: 10, g: 214, b: 214 },
+      { r: 219, g: 55, b: 197 },
+      { r: 244, g: 251, b: 255 }
+    ];
+    const segment = clamp(Math.round(luminance * (palette.length - 1)), 0, palette.length - 1);
+    const paletteColor = palette[segment];
+    const source = { r: red, g: green, b: blue };
+    const intensity = clamp(Math.abs((blue - red) / 255) * 0.5 + 0.48, 0.42, 0.78);
+    return blendRgb(source, paletteColor, intensity);
+  }
+
+  if (style === 'dopamine') {
+    const hueSlots = [0.08, 0.14, 0.53, 0.9];
+    const mappedHue = hueSlots[Math.floor(hsl.h * hueSlots.length) % hueSlots.length];
+    const base = hslToRgb(mappedHue, clamp(hsl.s * 1.5 + 0.18, 0, 1), clamp(hsl.l + 0.08, 0, 1));
+    const candy = luminance > 0.62 ? { r: 255, g: 214, b: 77 } : { r: 255, g: 86, b: 140 };
+    return blendRgb(base, candy, luminance > 0.62 ? 0.18 : 0.12);
+  }
+
+  if (style === 'dark') {
+    const shadow = { r: 10, g: 18, b: 30 };
+    const mid = { r: 54, g: 73, b: 98 };
+    const highlight = { r: 215, g: 224, b: 237 };
+    const blend = luminance < 0.42 ? shadow : luminance < 0.76 ? mid : highlight;
+    const cool = blendRgb({ r: red, g: green, b: blue }, blend, luminance < 0.42 ? 0.76 : 0.58);
+    return {
+      r: roundChannel(cool.r * 0.94),
+      g: roundChannel(cool.g * 0.97),
+      b: roundChannel(cool.b * 1.04)
+    };
+  }
+
+  if (style === 'glass') {
+    const desaturated = hslToRgb(hsl.h * 0.96 + 0.02, clamp(hsl.s * 0.26 + 0.04, 0, 1), clamp(0.2 + luminance * 0.62, 0, 1));
+    const icyTone = luminance > 0.58 ? { r: 232, g: 245, b: 255 } : { r: 181, g: 213, b: 236 };
+    const mixed = blendRgb(desaturated, icyTone, 0.42 + luminance * 0.08);
+    return {
+      r: roundChannel(mixed.r * (0.95 + luminance * 0.12)),
+      g: roundChannel(mixed.g * (0.98 + luminance * 0.08)),
+      b: roundChannel(mixed.b * (1.04 + luminance * 0.12))
+    };
+  }
+
+  return {
+    r: adjustContrast(red, 1.02),
+    g: adjustContrast(green, 1.02),
+    b: adjustContrast(blue, 1.02)
+  };
+}
+
+function paintPixelGrid(ctx, size, opacity) {
+  void ctx;
+  void size;
+  void opacity;
 }
 
 function paintOverlayToMask(ctx, size, style) {
@@ -558,7 +538,7 @@ function paintOverlayToMask(ctx, size, style) {
     gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, size, size);
-    drawPixelGrid(ctx, size, 0.045);
+    paintPixelGrid(ctx, size, 0.045);
     return;
   }
 
@@ -569,7 +549,7 @@ function paintOverlayToMask(ctx, size, style) {
     glow.addColorStop(1, 'rgba(3, 8, 19, 0.12)');
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, size, size);
-    drawPixelGrid(ctx, size, 0.06);
+    paintPixelGrid(ctx, size, 0.06);
     return;
   }
 
@@ -580,7 +560,7 @@ function paintOverlayToMask(ctx, size, style) {
     burst.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = burst;
     ctx.fillRect(0, 0, size, size);
-    drawPixelGrid(ctx, size, 0.035);
+    paintPixelGrid(ctx, size, 0.035);
     return;
   }
 
@@ -590,11 +570,42 @@ function paintOverlayToMask(ctx, size, style) {
     vignette.addColorStop(1, 'rgba(4, 6, 12, 0.42)');
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, size, size);
-    drawPixelGrid(ctx, size, 0.03);
+    paintPixelGrid(ctx, size, 0.03);
     return;
   }
 
-  drawPixelGrid(ctx, size, 0.05);
+  if (style === 'glass') {
+    const frost = ctx.createLinearGradient(0, 0, size, size);
+    frost.addColorStop(0, 'rgba(255, 255, 255, 0.34)');
+    frost.addColorStop(0.45, 'rgba(220, 240, 255, 0.14)');
+    frost.addColorStop(1, 'rgba(150, 196, 228, 0.08)');
+    ctx.fillStyle = frost;
+    ctx.fillRect(0, 0, size, size);
+
+    const reflection = ctx.createLinearGradient(size * 0.15, 0, size * 0.85, size);
+    reflection.addColorStop(0, 'rgba(255, 255, 255, 0.38)');
+    reflection.addColorStop(0.3, 'rgba(255, 255, 255, 0.08)');
+    reflection.addColorStop(0.6, 'rgba(173, 219, 255, 0.16)');
+    reflection.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = reflection;
+    ctx.fillRect(0, 0, size, size);
+
+    const rim = ctx.createRadialGradient(size * 0.35, size * 0.24, size * 0.04, size * 0.5, size * 0.5, size * 0.74);
+    rim.addColorStop(0, 'rgba(255,255,255,0.22)');
+    rim.addColorStop(0.55, 'rgba(255,255,255,0.04)');
+    rim.addColorStop(1, 'rgba(125, 182, 221, 0.16)');
+    ctx.fillStyle = rim;
+    ctx.fillRect(0, 0, size, size);
+    paintPixelGrid(ctx, size, 0.022);
+    return;
+  }
+
+  if (style === 'custom') {
+    paintPixelGrid(ctx, size, 0.028);
+    return;
+  }
+
+  paintPixelGrid(ctx, size, 0.05);
 }
 
 function applySubjectOverlay(subjectCanvas, style) {
@@ -610,24 +621,60 @@ function applySubjectOverlay(subjectCanvas, style) {
   subjectCtx.drawImage(overlayCanvas, 0, 0);
 }
 
-function getStyledSample(image, style) {
+function createStyledSample({ image, style, customStyleColors, customStyleColorCount }) {
+  const baseCanvas = getExtractedSample(image);
+  const sampleCanvas = createCanvas(EXPORT_SIZE);
+  const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+  sampleCtx.clearRect(0, 0, EXPORT_SIZE, EXPORT_SIZE);
+  sampleCtx.drawImage(baseCanvas, 0, 0);
+
+  const imageData = sampleCtx.getImageData(0, 0, EXPORT_SIZE, EXPORT_SIZE);
+  const { data } = imageData;
+
+  for (let index = 0; index < data.length; index += 4) {
+    if (data[index + 3] === 0) {
+      continue;
+    }
+
+    const next = transformPixel(style, data[index], data[index + 1], data[index + 2], {
+      customStyleColors,
+      customStyleColorCount
+    });
+    data[index] = next.r;
+    data[index + 1] = next.g;
+    data[index + 2] = next.b;
+  }
+
+  sampleCtx.putImageData(imageData, 0, 0);
+  applySubjectOverlay(sampleCanvas, style);
+  return sampleCanvas;
+}
+
+function getStyledSample(image, style, customStyleColors, customStyleColorCount) {
   let styleCache = styledSampleCache.get(image);
   if (!styleCache) {
     styleCache = new Map();
     styledSampleCache.set(image, styleCache);
   }
 
-  if (!styleCache.has(style)) {
-    const styledSample = createStyledSample({ image, style });
-    applySubjectOverlay(styledSample, style);
-    styleCache.set(style, styledSample);
+  const cacheKey = buildStyleCacheKey(style, customStyleColors, customStyleColorCount);
+
+  if (!styleCache.has(cacheKey)) {
+    const styledSample = createStyledSample({
+      image,
+      style,
+      customStyleColors,
+      customStyleColorCount
+    });
+    styleCache.set(cacheKey, styledSample);
   }
 
-  return styleCache.get(style);
+  return styleCache.get(cacheKey);
 }
 
-function createPixelatedSubject({ image, style, size, pixelLevel }) {
-  const styledSample = getStyledSample(image, style);
+function createPixelatedSubject({ image, style, size, pixelLevel, customStyleColors, customStyleColorCount }) {
+  const styledSample = getStyledSample(image, style, customStyleColors, customStyleColorCount);
   const subjectCanvas = createCanvas(size);
   const subjectCtx = subjectCanvas.getContext('2d');
   const rasterSize = clamp(Math.min(Number(pixelLevel) || EXPORT_SIZE, size), 1, size);
@@ -645,12 +692,22 @@ function createPixelatedSubject({ image, style, size, pixelLevel }) {
   return subjectCanvas;
 }
 
-function drawStyledImage({ ctx, image, style, size, pixelLevel }) {
-  const subjectCanvas = createPixelatedSubject({ image, style, size, pixelLevel });
-  ctx.drawImage(subjectCanvas, 0, 0);
+function getEffectiveStyle(style, customStyleEnabled) {
+  return customStyleEnabled ? 'custom' : style;
 }
 
-function renderToCanvas({ canvas, image, style, backgroundColor, size, pixelLevel }) {
+function renderToCanvas({
+  canvas,
+  image,
+  style,
+  backgroundColor,
+  size,
+  pixelLevel,
+  subjectOpacity = 100,
+  customStyleEnabled = false,
+  customStyleColors = DEFAULT_CUSTOM_STYLE_COLORS,
+  customStyleColorCount = 2
+}) {
   const ctx = canvas.getContext('2d');
   canvas.width = size;
   canvas.height = size;
@@ -662,23 +719,40 @@ function renderToCanvas({ canvas, image, style, backgroundColor, size, pixelLeve
     ctx.fillRect(0, 0, size, size);
   }
 
-  drawStyledImage({ ctx, image, style, size, pixelLevel });
+  const effectiveStyle = getEffectiveStyle(style, customStyleEnabled);
+  const subjectCanvas = createPixelatedSubject({
+    image,
+    style: effectiveStyle,
+    size,
+    pixelLevel,
+    customStyleColors,
+    customStyleColorCount
+  });
 
   ctx.save();
-  ctx.strokeStyle = style === 'dark' ? 'rgba(221, 230, 244, 0.18)' : 'rgba(16, 32, 45, 0.12)';
-  ctx.lineWidth = size * 0.018;
-  ctx.strokeRect(size * 0.018, size * 0.018, size * 0.964, size * 0.964);
+  ctx.globalAlpha = clamp((Number(subjectOpacity) || 0) / 100, 0, 1);
+  ctx.drawImage(subjectCanvas, 0, 0);
   ctx.restore();
 }
 
-/*
+function yieldToBrowser() {
+  return new Promise(resolve => {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => resolve());
+      return;
+    }
+
+    setTimeout(resolve, 0);
+  });
+}
+
 export async function decodeLocalImage(file) {
   if (!file) {
     throw new Error('没有检测到图片文件。');
   }
 
   if (!isSupportedFile(file)) {
-    throw new Error('仅支持 JPG、JPEG、PNG 图片。');
+    throw new Error('仅支持 JPG、JPEG 和 PNG 图片。');
   }
 
   const objectUrl = URL.createObjectURL(file);
@@ -698,83 +772,41 @@ export async function decodeLocalImage(file) {
   });
 }
 
-*/
-
-export async function decodeLocalImage(file) {
-  if (!file) {
-    throw new Error('No image file was detected.');
-  }
-
-  if (!isSupportedFile(file)) {
-    throw new Error('Only JPG, JPEG, and PNG files are supported.');
-  }
-
-  const objectUrl = URL.createObjectURL(file);
-
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.decoding = 'async';
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve({ file, image });
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error('Image parsing failed. Please try another picture.'));
-    };
-    image.src = objectUrl;
-  });
-}
-
-export function createCenteredCropRect(image, zoom = 1, focusX = 0.5, focusY = 0.5) {
-  const { width, height } = getImageSize(image);
-  const square = Math.min(width, height);
-  const size = square / zoom;
-  const x = clamp(width * focusX - size / 2, 0, width - size);
-  const y = clamp(height * focusY - size / 2, 0, height - size);
-
-  return {
-    x,
-    y,
-    size,
-    zoom,
-    focusX: (x + size / 2) / width,
-    focusY: (y + size / 2) / height
-  };
-}
-
-export function zoomCropRect(image, cropRect, zoom) {
-  return createCenteredCropRect(image, zoom, cropRect.focusX, cropRect.focusY);
-}
-
-export function moveCropRect(image, cropRect, deltaX, deltaY) {
-  const { width, height } = getImageSize(image);
-  const x = clamp(cropRect.x + deltaX, 0, width - cropRect.size);
-  const y = clamp(cropRect.y + deltaY, 0, height - cropRect.size);
-
-  return {
-    ...cropRect,
-    x,
-    y,
-    focusX: (x + cropRect.size / 2) / width,
-    focusY: (y + cropRect.size / 2) / height
-  };
-}
-
-export function renderAvatarPreview({ canvas, image, style, backgroundColor, pixelLevel }) {
+export function renderAvatarPreview({
+  canvas,
+  image,
+  style,
+  backgroundColor,
+  pixelLevel,
+  subjectOpacity,
+  customStyleEnabled,
+  customStyleColors,
+  customStyleColorCount
+}) {
   renderToCanvas({
     canvas,
     image,
     style,
     backgroundColor,
     size: EXPORT_SIZE,
-    pixelLevel
+    pixelLevel,
+    subjectOpacity,
+    customStyleEnabled,
+    customStyleColors,
+    customStyleColorCount
   });
 }
 
-export async function buildStylePreview({ image, style, backgroundColor, pixelLevel, tier = 'desktop' }) {
+export async function buildStylePreview({
+  image,
+  style,
+  backgroundColor,
+  pixelLevel,
+  subjectOpacity,
+  tier = 'desktop'
+}) {
   const previewSize = getPreviewSizeForTier(tier);
-  const cacheKey = getPreviewCacheKey(style, backgroundColor, pixelLevel, tier);
+  const cacheKey = getPreviewCacheKey({ style, backgroundColor, pixelLevel, tier, subjectOpacity });
   const imageCache = getPreviewCache(image);
 
   if (imageCache.has(cacheKey)) {
@@ -788,7 +820,8 @@ export async function buildStylePreview({ image, style, backgroundColor, pixelLe
     style,
     backgroundColor,
     size: previewSize,
-    pixelLevel
+    pixelLevel,
+    subjectOpacity
   });
 
   const previewDataUrl = canvas.toDataURL('image/png');
@@ -801,6 +834,7 @@ export async function buildStylePreviewsProgressive({
   backgroundColor,
   pixelLevel,
   priorityStyle,
+  subjectOpacity,
   tier = 'desktop',
   onPreview,
   signal
@@ -820,6 +854,7 @@ export async function buildStylePreviewsProgressive({
       style: style.id,
       backgroundColor,
       pixelLevel,
+      subjectOpacity,
       tier
     });
 
@@ -838,7 +873,17 @@ export async function buildStylePreviewsProgressive({
   }
 }
 
-export async function exportAvatarPng({ image, style, backgroundColor, fileName, pixelLevel }) {
+export async function exportAvatarPng({
+  image,
+  style,
+  backgroundColor,
+  fileName,
+  pixelLevel,
+  subjectOpacity,
+  customStyleEnabled,
+  customStyleColors,
+  customStyleColorCount
+}) {
   const canvas = createCanvas(EXPORT_SIZE);
   renderToCanvas({
     canvas,
@@ -846,13 +891,18 @@ export async function exportAvatarPng({ image, style, backgroundColor, fileName,
     style,
     backgroundColor,
     size: EXPORT_SIZE,
-    pixelLevel
+    pixelLevel,
+    subjectOpacity,
+    customStyleEnabled,
+    customStyleColors,
+    customStyleColorCount
   });
 
   const link = document.createElement('a');
   const cleanName = sanitizeFileName(fileName || 'avatar');
+  const outputMode = customStyleEnabled ? 'custom' : style;
   link.href = canvas.toDataURL('image/png');
-  link.download = `${cleanName}-${style}.png`;
+  link.download = `${cleanName}-${outputMode}.png`;
   link.click();
 }
 
@@ -923,17 +973,32 @@ export function getDefaultGalleryItems(backgroundColor = BACKGROUND_OPTIONS[0].v
       };
     }
 
+    if (style.id === 'glass') {
+      return {
+        id: style.id,
+        text: style.label,
+        note: style.description,
+        image: createPreviewCardSvg({
+          title: 'GLASS',
+          subtitle: 'LIQUID LIGHT LAYERS',
+          fillA: tintHex(previewBackground, '#eff8ff', 0.6),
+          fillB: tintHex(previewBackground, '#b4d3f0', 0.46),
+          accent: '#d7eeff'
+        })
+      };
+    }
+
     return {
       id: style.id,
       text: style.label,
       note: style.description,
-        image: createPreviewCardSvg({
-          title: 'NORMAL',
-          subtitle: 'CLEAN PIXEL PORTRAIT',
-          fillA: fillBase,
-          fillB: tintHex(previewBackground, '#dbefff', 0.42),
-          accent: '#ff9268'
-        })
+      image: createPreviewCardSvg({
+        title: 'NORMAL',
+        subtitle: 'CLEAN PIXEL PORTRAIT',
+        fillA: fillBase,
+        fillB: tintHex(previewBackground, '#dbefff', 0.42),
+        accent: '#ff9268'
+      })
     };
   });
 }

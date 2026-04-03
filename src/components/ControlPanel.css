@@ -1,7 +1,11 @@
-.control-panel {
+﻿.control-panel {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.control-panel--compact {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .control-panel__card {
@@ -104,7 +108,8 @@
 }
 
 @media (max-width: 820px) {
-  .control-panel {
+  .control-panel,
+  .control-panel--compact {
     grid-template-columns: 1fr;
   }
 }
